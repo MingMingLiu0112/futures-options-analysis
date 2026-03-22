@@ -9,6 +9,9 @@ import sys
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
+# 添加项目路径到 sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # 加载环境变量
 load_dotenv()
 
