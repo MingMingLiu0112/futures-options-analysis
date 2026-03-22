@@ -150,38 +150,27 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 获取AKShare中所有包含futures的函数
-        futures_funcs = [f for f in dir(ak) if 'future' in f.lower()]
-        print(f"AKShare期货函数: {futures_funcs}")
+        # 方法1: 新浪期货日线
+        try:
+            result = ak.futures_zh_daily_sina(symbol=letters)
+            print(f"原始返回类型: {type(result)}")
+            if isinstance(result, dict):
+                print(f"字典keys: {list(result.keys())[:5]}")
+                # 可能是嵌套字典
+                if 'data' in result:
+                    result = result['data']
+                elif 'df' in result:
+                    result = result['df']
+            if hasattr(result, 'shape'):
+                print(f"DataFrame shape: {result.shape}")
+            print(f"列名: {list(result.columns) if hasattr(result, 'columns') else result}")
+            df = pd.DataFrame(result)
+            if not df.empty:
+                print(f"✅ 新浪日线: {len(df)}条")
+        except Exception as e:
+            print(f"新浪日线失败: {e}")
         
-        # 获取所有包含daily的函数
-        daily_funcs = [f for f in dir(ak) if 'daily' in f.lower() or 'hist' in f.lower()]
-        print(f"日线函数: {daily_funcs}")
-        
-        # 获取所有包含zh的函数
-        zh_funcs = [f for f in dir(ak) if 'zh' in f.lower() and 'future' in f.lower()]
-        print(f"中文期货函数: {zh_funcs}")
-        
-        # 方法1: 尝试所有可能的函数
-        all_funcs_to_try = [
-            ("新浪日线", lambda: ak.futures_zh_daily_sina(symbol=letters)),
-            ("新浪日线2", lambda: ak.futures_daily_sina(symbol=letters)),
-            ("日K线", lambda: ak.futures_daily(symbol=letters)),
-            ("历史K线", lambda: ak.futures_hist(symbol=letters)),
-        ]
-        
-        for name, func in all_funcs_to_try:
-            try:
-                result = func()
-                if result is not None and not result.empty and len(result) > 0:
-                    if hasattr(result, 'shape') and len(result.shape) > 1:
-                        df = result
-                        print(f"✅ {name}: {len(df)}条")
-                        break
-            except Exception as e:
-                print(f"❌ {name}失败: {e}")
-        
-        if df.empty:
+        if df.empty or len(df.columns) == 0:
             print(f"⚠️ {symbol} 获取失败")
             return pd.DataFrame()
         
@@ -207,7 +196,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         if len(df) > 60:
             df = df.tail(60)
         
-        print(f"   最终数据: {len(df)}条")
+        print(f"   最终数据: {len(df)}条, 列: {list(df.columns)}")
         return df
         
     except Exception as e:
