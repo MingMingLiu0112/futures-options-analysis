@@ -137,7 +137,6 @@ def calculate_volume_profile(df: pd.DataFrame) -> tuple:
 def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
     使用AKShare获取期货日线数据
-    symbol格式: 'M' = 豆粕主力连续, 'M2609' = 豆粕2609
     """
     try:
         import akshare as ak
@@ -146,31 +145,27 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         contract_code = symbol.upper()
         letters = ''.join([c for c in contract_code if c.isalpha()])
-        numbers = ''.join([c for c in contract_code if c.isdigit()])
         
         print(f"正在获取 {symbol} ({letters}) 数据...")
         
         df = pd.DataFrame()
         
-        # 尝试多个AKShare函数
-        ak_funcs = [
-            ("新浪日线", lambda: ak.futures_zh_daily_sina(symbol=letters)),
-            ("新浪日线2", lambda: ak.futures_zh_daily(symbol=letters, start_date=start_date, end_date=end_date)),
-            ("东财日线", lambda: ak.futures_zh_daily_em(symbol=letters)),
-            ("东财日线2", lambda: ak.futures_daily_em(symbol=letters)),
-        ]
+        # 获取AKShare中所有包含futures的函数
+        futures_funcs = [f for f in dir(ak) if 'future' in f.lower()]
+        print(f"AKShare期货函数: {futures_funcs[:10]}")
         
-        for name, func in ak_funcs:
-            try:
-                df = func()
-                if not df.empty and len(df) > 0:
-                    print(f"✅ {name}: {len(df)}条, 列名={list(df.columns)}")
-                    break
-            except Exception as e:
-                print(f"❌ {name}失败: {e}")
+        # 方法1: 尝试futures_zh_daily_sina
+        try:
+            result = ak.futures_zh_daily_sina(symbol=letters)
+            print(f"futures_zh_daily_sina返回: {type(result)}, shape={getattr(result, 'shape', 'N/A')}")
+            if hasattr(result, 'shape') and len(result.shape) > 1:
+                df = result
+                print(f"✅ 新浪日线: {len(df)}条")
+        except Exception as e:
+            print(f"新浪日线失败: {e}")
         
-        if df.empty or len(df) == 0:
-            print(f"⚠️ {symbol} 所有AKShare方法均失败")
+        if df.empty:
+            print(f"⚠️ {symbol} 获取失败")
             return pd.DataFrame()
         
         # 统一列名
@@ -184,17 +179,14 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         }
         df = df.rename(columns=rename_map)
         
-        # 转换日期
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date'], errors='coerce')
             df = df.sort_values('date')
         
-        # 确保数值类型
         for col in ['open', 'high', 'low', 'close', 'volume']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # 取最近60天
         if len(df) > 60:
             df = df.tail(60)
         
