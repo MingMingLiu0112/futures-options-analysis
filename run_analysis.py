@@ -141,6 +141,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
     try:
         import akshare as ak
         import pandas as pd
+        import numpy as np
         from datetime import datetime, timedelta
         
         contract_code = symbol.upper()
@@ -153,20 +154,29 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         # 方法1: 新浪期货日线
         try:
             result = ak.futures_zh_daily_sina(symbol=letters)
-            print(f"原始返回类型: {type(result)}")
-            if isinstance(result, dict):
-                print(f"字典keys: {list(result.keys())[:5]}")
-                # 可能是嵌套字典
-                if 'data' in result:
-                    result = result['data']
-                elif 'df' in result:
-                    result = result['df']
-            if hasattr(result, 'shape'):
-                print(f"DataFrame shape: {result.shape}")
-            print(f"列名: {list(result.columns) if hasattr(result, 'columns') else result}")
-            df = pd.DataFrame(result)
-            if not df.empty:
-                print(f"✅ 新浪日线: {len(df)}条")
+            print(f"返回类型: {type(result)}, shape: {getattr(result, 'shape', 'N/A')}")
+            
+            # 如果返回Series，转换为DataFrame
+            if isinstance(result, pd.Series):
+                print("转换为DataFrame...")
+                df = result.to_frame().T
+                print(f"转换后: {df.shape}")
+            elif isinstance(result, pd.DataFrame):
+                df = result
+                print(f"DataFrame: {df.shape}")
+            elif hasattr(result, '__iter__') and not isinstance(result, str):
+                # 如果是列表或字典
+                if isinstance(result, (list, tuple)):
+                    df = pd.DataFrame(result)
+                elif isinstance(result, dict):
+                    if len(result) > 0:
+                        first_val = list(result.values())[0]
+                        if isinstance(first_val, (list, tuple)):
+                            df = pd.DataFrame(result)
+                        else:
+                            df = pd.DataFrame([result])
+            
+            print(f"处理后数据: {df.shape if not df.empty else 'empty'}")
         except Exception as e:
             print(f"新浪日线失败: {e}")
         
@@ -196,7 +206,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         if len(df) > 60:
             df = df.tail(60)
         
-        print(f"   最终数据: {len(df)}条, 列: {list(df.columns)}")
+        print(f"   最终数据: {len(df)}条")
         return df
         
     except Exception as e:
