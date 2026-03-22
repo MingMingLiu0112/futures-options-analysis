@@ -368,9 +368,6 @@ OPTIONS_IV = {
     "AU2509": {"put_iv": 16.2, "call_iv": 15.8}, # 黄金
     "AG2509": {"put_iv": 35.0, "call_iv": 32.5}  # 白银
 }
-    "AU": {"put_iv": 16.2, "call_iv": 15.8},
-    "AG": {"put_iv": 35.0, "call_iv": 32.5}
-}
 
 
 def main():
