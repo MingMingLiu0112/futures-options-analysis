@@ -136,11 +136,11 @@ def calculate_volume_profile(df: pd.DataFrame) -> tuple:
 
 def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
-    使用AKShare获取期货日线数据
-    symbol: 品种代码，如 'M' (豆粕), 'CU' (铜), 'AU' (黄金)
+    获取期货日线数据
+    使用东方财富API
     """
     try:
-        import akshare as ak
+        import requests
         import pandas as pd
         from datetime import datetime, timedelta
         
@@ -151,63 +151,52 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 方法1: AKShare新浪期货日线
+        # 东方财富期货K线API
+        # secid: 113=大连商品, 114=上海期货, 115=郑州商品, 100=中金所
+        # 豆粕(M)是大连商品交易所，secid前缀是113
         try:
-            df = ak.futures_zh_daily_sina(symbol=base_symbol)
-            print(f"✅ AKShare新浪数据: shape={df.shape}, columns={list(df.columns)}")
-        except Exception as e1:
-            print(f"AKShare新浪方法失败: {e1}")
-            # 打印原始返回
-            try:
-                import requests
-                url = f"https://hq.sinajs.cn/list=nf_{base_symbol}"
-                resp = requests.get(url, headers={'Referer': 'https://finance.sina.com.cn/', 'User-Agent': 'Mozilla/5.0'}, timeout=10)
-                print(f"   原始响应: {resp.text[:200]}")
-            except:
-                pass
+            url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+            params = {
+                "secid": f"113.{contract_code}",  # 113=大商所
+                "fields1": "f1,f2,f3,f4,f5,f6",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+                "klt": 101,  # 日K
+                "fqt": 1,
+                "beg": "20240101",
+                "end": "20500101",
+                "lmt": 60,
+                "ut": "fa5fd1943c7b386f172d6893dbfba10b"
+            }
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+            
+            if data.get("data") and data["data"].get("klines"):
+                klines = data["data"]["klines"]
+                print(f"✅ 东财K线数据: {len(klines)}条")
+                
+                records = []
+                for kline in klines:
+                    parts = kline.split(',')
+                    # 格式: 日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+                    if len(parts) >= 6:
+                        records.append({
+                            'date': pd.to_datetime(parts[0]),
+                            'open': float(parts[1]),
+                            'close': float(parts[2]),
+                            'high': float(parts[3]),
+                            'low': float(parts[4]),
+                            'volume': float(parts[5])
+                        })
+                df = pd.DataFrame(records)
+                print(f"   数据示例: {records[-1] if records else 'N/A'}")
+            else:
+                print(f"东财返回为空: {data}")
+        except Exception as e:
+            print(f"东财方法失败: {e}")
         
-        # 方法2: 东财期货行情
-        if df.empty or len(df) == 0:
-            try:
-                spot_df = ak.futures_zh_spot()
-                print(f"✅ 东财行情: shape={spot_df.shape}, columns={list(spot_df.columns)[:5]}")
-                # 筛选品种
-                if 'symbol' in spot_df.columns:
-                    m_df = spot_df[spot_df['symbol'].str.contains(base_symbol, case=False, na=False)]
-                    print(f"   筛选后: {len(m_df)}条")
-                    if not m_df.empty:
-                        print(f"   示例数据: {m_df.iloc[0].to_dict()}")
-            except Exception as e2:
-                print(f"东财行情方法失败: {e2}")
-        
-        if df.empty or len(df) == 0:
-            print(f"⚠️ {symbol} AKShare数据获取失败")
+        if df.empty:
+            print(f"⚠️ {symbol} 东财数据获取失败")
             return pd.DataFrame()
-        
-        # 统一列名
-        rename_map = {
-            '日期': 'date', 'date': 'date', 'trade_date': 'date',
-            '开盘': 'open', 'open': 'open',
-            '最高': 'high', 'high': 'high',
-            '最低': 'low', 'low': 'low',
-            '收盘': 'close', 'close': 'close',
-            '成交量': 'volume', 'volume': 'volume'
-        }
-        df = df.rename(columns=rename_map)
-        
-        # 转换日期
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df = df.sort_values('date')
-        
-        # 确保数值类型
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # 取最近60天
-        if len(df) > 60:
-            df = df.tail(60)
         
         print(f"   最终数据: {len(df)}条")
         return df
