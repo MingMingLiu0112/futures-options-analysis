@@ -1,38 +1,62 @@
 name: Futures Options Analysis
 
 on:
+  # 定时触发 - 每天北京时间 08:00, 15:00, 21:00
+  # UTC: 00:00, 07:00, 13:00
   schedule:
-    # 每天早上8点、下午3点、晚上9点运行（国内期货活跃时段）
-    - cron: '0 0,7,14,20 * * *'
+    - cron: '0 0,7,13 * * 1-5'
+  
+  # 手动触发
   workflow_dispatch:
-    # 手动触发
+    inputs:
+      symbols:
+        description: '期货品种 (逗号分隔)'
+        required: false
+        default: 'CU,AU,AG'
+        type: string
+
+# 并发控制
+concurrency:
+  group: futures-analysis
+  cancel-in-progress: false
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: 随机延迟
+        run: sleep $((RANDOM % 30))
       
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: 检出代码
+        uses: actions/checkout@v5
+      
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: 'pip'
       
-      - name: Install dependencies
+      - name: 安装依赖
         run: |
+          pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Run analysis
+      - name: 创建输出目录
+        run: mkdir -p output
+      
+      - name: 执行分析
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        run: python main.py
+        run: |
+          echo "📊 期货品种: ${{ github.event.inputs.symbols || 'CU,AU,AG' }}"
+          python main.py
       
-      - name: Commit results
+      - name: 提交结果
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add -A
-          git diff --staged --quiet || git commit -m "Update analysis results $(date +'%Y-%m-%d %H:%M')"
-          git push
+          git diff --staged --quiet || git commit -m "Update analysis $(date +'%Y-%m-%d %H:%M')"
+          git push || true

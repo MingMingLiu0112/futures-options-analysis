@@ -4,6 +4,7 @@
 
 import requests
 import json
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -158,11 +159,15 @@ class FeishuPusher:
 # 全局推送器实例（需初始化）
 pusher: Optional[FeishuPusher] = None
 
+# 默认飞书 Webhook（从 memory 获取）
+DEFAULT_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/8148922b-04f5-469f-994e-ae3e17d6b256"
 
-def init_pusher(webhook_url: str):
+
+def init_pusher(webhook_url: str = None):
     """初始化全局推送器"""
     global pusher
-    pusher = FeishuPusher(webhook_url)
+    url = webhook_url or os.getenv("FEISHU_WEBHOOK") or DEFAULT_WEBHOOK
+    pusher = FeishuPusher(url)
     return pusher
 
 
