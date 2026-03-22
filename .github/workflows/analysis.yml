@@ -42,6 +42,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -e .  # 以开发模式安装当前包
       
       - name: 创建输出目录
         run: mkdir -p output
@@ -52,7 +53,6 @@ jobs:
         run: |
           echo "📊 期货品种: ${{ github.event.inputs.symbols || 'CU,AU,AG' }}"
           echo "PWD: $(pwd)"
-          echo "Files: $(ls -la)"
           echo "---"
           python run_analysis.py
       
