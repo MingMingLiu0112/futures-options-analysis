@@ -52,9 +52,12 @@ jobs:
         run: |
           echo "📊 期货品种: ${{ github.event.inputs.symbols || 'CU,AU,AG' }}"
           echo "PWD: $(pwd)"
-          echo "ls: $(ls)"
-          # Run with PYTHONPATH set explicitly
-          PYTHONPATH="$(pwd)" python main.py
+          echo "Tree:"
+          find . -maxdepth 2 -type f -o -type d | head -30
+          echo "---"
+          # Run with PYTHONPATH set to parent
+          cd ..
+          PYTHONPATH="$(pwd)" python futures-options-analysis/main.py
       
       - name: 提交结果
         run: |
