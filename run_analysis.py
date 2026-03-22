@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
 期货期权分析 - 主入口
-支持多品种分析，输出到飞书
-
-注意: 需要设置 PYTHONPATH 或从项目根目录运行
+直接导入同目录下的模块
 """
 
 import os
@@ -11,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# 确保当前目录在 sys.path 中
+# 添加当前目录到 sys.path
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
@@ -19,27 +17,46 @@ if _current_dir not in sys.path:
 # 加载环境变量
 load_dotenv()
 
-# 导入模块
-from futures_options import FuturesOptionsAnalyzer
-from futures_options.push.feishu import init_pusher, send_report
-from futures_options.data.futures_data import get_futures_daily
-from futures_options.utils.indicators import calculate_technical_indicators
+# 直接导入模块（同目录）
+import importlib.util
+
+def import_module_from_file(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+# 导入各个模块
+analyzer = import_module_from_file("analyzer", os.path.join(_current_dir, "analyzer.py"))
+signals_volatility = import_module_from_file("signals_volatility", os.path.join(_current_dir, "signals", "volatility.py"))
+data_futures = import_module_from_file("futures_data", os.path.join(_current_dir, "data", "futures_data.py"))
+utils_indicators = import_module_from_file("indicators", os.path.join(_current_dir, "utils", "indicators.py"))
+push_feishu = import_module_from_file("feishu", os.path.join(_current_dir, "push", "feishu.py"))
+
+FuturesOptionsAnalyzer = analyzer.FuturesOptionsAnalyzer
+init_pusher = push_feishu.init_pusher
+send_report = push_feishu.send_report
+get_futures_daily = data_futures.get_futures_daily
+calculate_technical_indicators = utils_indicators.calculate_technical_indicators
+
+# 计算波动率信号的函数
+calculate_iv_rank = signals_volatility.calculate_iv_rank
+calculate_iv_skew = signals_volatility.calculate_iv_skew
+calculate_iv_percentile = signals_volatility.calculate_iv_percentile
+calculate_basis_iv_signal = signals_volatility.calculate_basis_iv_signal
+composite_signal = signals_volatility.composite_signal
 
 
 # ============== 配置区 ==============
-# 要分析的期货品种
 TARGET_SYMBOLS = ["CU", "AU", "AG"]  # 铜、黄金、白银
 
-# IV历史数据（需要从数据源获取或存储）
-# 这里用模拟数据演示
 IV_HISTORY = {
     "CU": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],
     "AU": [12, 14, 15, 16, 18, 17, 15, 14, 13, 14, 15, 16, 18, 17, 16],
     "AG": [25, 28, 30, 32, 35, 38, 35, 32, 28, 30, 32, 35, 38, 40, 38]
 }
 
-# 期权IV数据（需要从数据源获取）
-# 格式: {品种: {put_iv: xx, call_iv: xx}}
 OPTIONS_IV = {
     "CU": {"put_iv": 24.5, "call_iv": 22.3},
     "AU": {"put_iv": 16.2, "call_iv": 15.8},
@@ -48,41 +65,26 @@ OPTIONS_IV = {
 
 
 def get_futures_data(symbol: str, days: int = 60) -> dict:
-    """
-    获取期货数据
-    
-    Returns:
-        dict with keys: df, basis
-    """
+    """获取期货数据"""
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
     
-    # 获取日线数据
     df = get_futures_daily(symbol, start_date, end_date)
     
     if df.empty:
         print(f"⚠️ 无法获取 {symbol} 期货数据")
         return {"df": None, "basis": 0}
     
-    # 计算技术指标
     if len(df) > 20:
         df = calculate_technical_indicators(df)
     
-    # 模拟基差数据（实际应从数据源获取）
-    # basis > 0 表示贴水，basis < 0 表示升水
-    basis = 0  # 默认
-    
-    return {
-        "df": df,
-        "basis": basis
-    }
+    return {"df": df, "basis": 0}
 
 
 def analyze_symbol(symbol: str) -> dict:
     """分析单个品种"""
     print(f"\n📊 正在分析 {symbol}...")
     
-    # 获取数据
     futures_data = get_futures_data(symbol)
     df = futures_data.get("df")
     
@@ -90,11 +92,9 @@ def analyze_symbol(symbol: str) -> dict:
         print(f"⚠️ {symbol} 无数据，跳过")
         return None
     
-    # 获取IV数据
     iv_history = IV_HISTORY.get(symbol, [])
     iv_data = OPTIONS_IV.get(symbol, {})
     
-    # 创建分析器
     analyzer = FuturesOptionsAnalyzer(
         symbol=symbol,
         iv_history=iv_history,
@@ -102,10 +102,7 @@ def analyze_symbol(symbol: str) -> dict:
         call_iv=iv_data.get("call_iv")
     )
     
-    # 执行分析
     result = analyzer.analyze(futures_data)
-    
-    # 打印结果
     analyzer.print_report(result)
     
     return result
@@ -118,7 +115,6 @@ def main():
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
-    # 初始化飞书推送
     webhook_url = os.getenv("FEISHU_WEBHOOK")
     if webhook_url:
         init_pusher(webhook_url)
@@ -126,27 +122,23 @@ def main():
     else:
         print("⚠️ 未配置 FEISHU_WEBHOOK，跳过推送")
     
-    # 分析所有品种
     results = []
     for symbol in TARGET_SYMBOLS:
         result = analyze_symbol(symbol)
         if result:
             results.append(result)
     
-    # 汇总报告
     if results:
         summary = create_summary(results)
         
-        # 推送到飞书
         if webhook_url:
             print("\n📤 正在推送到飞书...")
             if send_report(summary):
                 print("✅ 推送成功！")
             else:
-                print("⚠️ 推送失败，请检查 webhook 配置")
+                print("⚠️ 推送失败")
         
-        # 保存结果
-        save_results(results, summary)
+        save_results(results)
     else:
         print("\n⚠️ 没有可用的分析结果")
     
@@ -161,34 +153,26 @@ def create_summary(results: list) -> dict:
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     
-    # 汇总各品种信号
     signals_text = ""
     for r in results:
         comp = r.get("composite", {})
         action = comp.get("action", "watch")
-        action_emoji = {
-            "long": "🟢",
-            "short": "🔴",
-            "watch": "⚪"
-        }.get(action, "⚪")
-        
+        action_emoji = {"long": "🟢", "short": "🔴", "watch": "⚪"}.get(action, "⚪")
         signals_text += f"{action_emoji} **{r['symbol']}**: {comp.get('recommendation', 'N/A')}\n"
     
     summary["content"] = signals_text
-    
     return summary
 
 
-def save_results(results: list, summary: dict):
+def save_results(results: list):
     """保存分析结果"""
-    output_dir = os.path.join(os.path.dirname(__file__), "output")
+    output_dir = os.path.join(_current_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
     
-    # 保存JSON
     import json
     filename = os.path.join(output_dir, f"analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump({"summary": summary, "details": results}, f, ensure_ascii=False, indent=2)
+        json.dump({"results": results}, f, ensure_ascii=False, indent=2)
     
     print(f"💾 结果已保存: {filename}")
 
