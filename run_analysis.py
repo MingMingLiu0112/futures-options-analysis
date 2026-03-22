@@ -1,62 +1,259 @@
 #!/usr/bin/env python3
 """
-期货期权分析 - 主入口
-直接导入同目录下的模块
+期货期权综合分析
+包含所有模块，无外部依赖导入问题
 """
 
 import os
 import sys
+import json
+import requests
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# 添加当前目录到 sys.path
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-if _current_dir not in sys.path:
-    sys.path.insert(0, _current_dir)
-
-# 加载环境变量
 load_dotenv()
 
-# 直接导入模块（同目录）
-import importlib.util
+# ==================== 波动率信号模块 ====================
 
-def import_module_from_file(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-# 导入各个模块
-analyzer = import_module_from_file("analyzer", os.path.join(_current_dir, "analyzer.py"))
-signals_volatility = import_module_from_file("signals_volatility", os.path.join(_current_dir, "signals", "volatility.py"))
-data_futures = import_module_from_file("futures_data", os.path.join(_current_dir, "data", "futures_data.py"))
-utils_indicators = import_module_from_file("indicators", os.path.join(_current_dir, "utils", "indicators.py"))
-push_feishu = import_module_from_file("feishu", os.path.join(_current_dir, "push", "feishu.py"))
-
-FuturesOptionsAnalyzer = analyzer.FuturesOptionsAnalyzer
-init_pusher = push_feishu.init_pusher
-send_report = push_feishu.send_report
-get_futures_daily = data_futures.get_futures_daily
-calculate_technical_indicators = utils_indicators.calculate_technical_indicators
-
-# 计算波动率信号的函数
-calculate_iv_rank = signals_volatility.calculate_iv_rank
-calculate_iv_skew = signals_volatility.calculate_iv_skew
-calculate_iv_percentile = signals_volatility.calculate_iv_percentile
-calculate_basis_iv_signal = signals_volatility.calculate_basis_iv_signal
-composite_signal = signals_volatility.composite_signal
+def calculate_iv_rank(current_iv: float, iv_history: list) -> float:
+    if len(iv_history) < 2:
+        return 50.0
+    iv_min, iv_max = min(iv_history), max(iv_history)
+    if iv_max == iv_min:
+        return 50.0
+    return round((current_iv - iv_min) / (iv_max - iv_min) * 100, 2)
 
 
-# ============== 配置区 ==============
-TARGET_SYMBOLS = ["CU", "AU", "AG"]  # 铜、黄金、白银
+def calculate_iv_percentile(current_iv: float, iv_history: list) -> float:
+    if len(iv_history) < 2:
+        return 50.0
+    percentile = sum(1 for iv in iv_history if iv < current_iv) / len(iv_history) * 100
+    return round(percentile, 2)
 
+
+def calculate_iv_skew(put_iv: float, call_iv: float) -> dict:
+    skew = put_iv - call_iv
+    sentiment = "偏空" if skew > 0.5 else ("偏多" if skew < -0.5 else "中性")
+    return {"skew": round(skew, 4), "sentiment": sentiment, "put_iv": put_iv, "call_iv": call_iv}
+
+
+def calculate_basis_iv_signal(basis: float, current_iv: float, iv_history: list) -> dict:
+    iv_rank = calculate_iv_rank(current_iv, iv_history)
+    if basis > 0:
+        if iv_rank > 60:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "多信号共振偏多", "direction": "多", "confidence": "高", "reason": "贴水 + IV偏高"}
+        elif iv_rank < 40:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "矛盾信号", "direction": "观望", "confidence": "低", "reason": "贴水但IV偏低"}
+        else:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "偏多", "direction": "多", "confidence": "中", "reason": "贴水结构"}
+    else:
+        if iv_rank > 60:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "矛盾信号", "direction": "观望", "confidence": "低", "reason": "升水但IV偏高"}
+        elif iv_rank < 40:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "空信号共振", "direction": "空", "confidence": "高", "reason": "升水 + IV偏低"}
+        else:
+            return {"basis": round(basis, 4), "iv_rank": iv_rank, "signal": "偏空", "direction": "空", "confidence": "中", "reason": "升水结构"}
+
+
+def composite_signal(iv_rank: float, skew: float, basis_signal: dict, momentum: str = "neutral") -> dict:
+    score = 0
+    signals = []
+    if iv_rank < 20:
+        score += 2
+        signals.append("IV极低→波动即将放大")
+    elif iv_rank > 80:
+        score -= 2
+        signals.append("IV极高→注意风险")
+    if skew > 1:
+        score -= 1
+        signals.append("看跌Skew→市场担忧下跌")
+    elif skew < -1:
+        score += 1
+        signals.append("看涨Skew→市场看涨")
+    if basis_signal["direction"] == "多":
+        score += 2
+        signals.append(f"基差信号偏多({basis_signal['reason']})")
+    elif basis_signal["direction"] == "空":
+        score -= 2
+        signals.append(f"基差信号偏空({basis_signal['reason']})")
+    if momentum == "bullish":
+        score += 1
+        signals.append("价格动量向上")
+    elif momentum == "bearish":
+        score -= 1
+        signals.append("价格动量向下")
+    if score >= 3:
+        recommendation, action = "建议做多", "long"
+    elif score <= -3:
+        recommendation, action = "建议做空", "short"
+    else:
+        recommendation, action = "建议观望", "watch"
+    return {"score": score, "recommendation": recommendation, "action": action, "signals": signals, "confidence": "高" if abs(score) >= 3 else ("中" if abs(score) >= 1 else "低")}
+
+
+# ==================== 技术指标模块 ====================
+
+def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df['ma5'] = df['close'].rolling(5).mean()
+    df['ma10'] = df['close'].rolling(10).mean()
+    df['ma20'] = df['close'].rolling(20).mean()
+    df['ma60'] = df['close'].rolling(60).mean()
+    exp12 = df['close'].ewm(span=12, adjust=False).mean()
+    exp26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = exp12 - exp26
+    df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['histogram'] = df['macd'] - df['signal']
+    df['bb_mid'] = df['close'].rolling(20).mean()
+    bb_std = df['close'].rolling(20).std()
+    df['bb_upper'] = df['bb_mid'] + 2 * bb_std
+    df['bb_lower'] = df['bb_mid'] - 2 * bb_std
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
+    return df
+
+
+def detect_momentum(df: pd.DataFrame, lookback: int = 5) -> str:
+    if len(df) < lookback:
+        return "neutral"
+    recent = df.tail(lookback)
+    ma5, ma20 = recent['close'].mean(), df['close'].rolling(20).mean().iloc[-1]
+    return "bullish" if ma5 > ma20 * 1.02 else ("bearish" if ma5 < ma20 * 0.98 else "neutral")
+
+
+def calculate_volume_profile(df: pd.DataFrame) -> tuple:
+    volume = df['volume'].iloc[-1] if len(df) > 0 else 0
+    volume_ma = df['volume'].rolling(20).mean().iloc[-1] if len(df) >= 20 else volume
+    return volume, volume / volume_ma if volume_ma > 0 else 1.0
+
+
+# ==================== 数据获取模块 ====================
+
+def get_futures_daily(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    try:
+        import akshare as ak
+        df = ak.futures_zh_daily_sina(symbol=symbol)
+        df['date'] = pd.to_datetime(df['date'])
+        start, end = datetime.strptime(start_date, "%Y%m%d"), datetime.strptime(end_date, "%Y%m%d")
+        df = df[(df['date'] >= start) & (df['date'] <= end)]
+        return df
+    except Exception as e:
+        print(f"获取期货数据失败: {e}")
+        return pd.DataFrame()
+
+
+# ==================== 飞书推送模块 ====================
+
+class FeishuPusher:
+    DEFAULT_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/8148922b-04f5-469f-994e-ae3e17d6b256"
+    
+    def __init__(self, webhook_url: str = None):
+        self.webhook_url = webhook_url or os.getenv("FEISHU_WEBHOOK") or self.DEFAULT_WEBHOOK
+    
+    def send_card(self, card: dict) -> bool:
+        try:
+            resp = requests.post(self.webhook_url, json={"msg_type": "interactive", "card": card}, timeout=10)
+            result = resp.json()
+            return result.get("code") == 0 or result.get("StatusCode") == 0
+        except Exception as e:
+            print(f"推送失败: {e}")
+            return False
+    
+    def send_analysis_report(self, results: list) -> bool:
+        card = {
+            "header": {"title": {"tag": "plain_text", "content": "📊 期货期权日度分析"}, "template": "purple"},
+            "elements": []
+        }
+        for r in results:
+            comp = r.get("composite", {})
+            action = comp.get("action", "watch")
+            emoji = {"long": "🟢", "short": "🔴", "watch": "⚪"}.get(action, "⚪")
+            iv = r.get("iv_signal", {})
+            signals_text = "\n".join([f"• {s}" for s in comp.get("signals", [])]) or "无"
+            content = (
+                f"{emoji} **{r['symbol']}**: {comp.get('recommendation', 'N/A')}\n\n"
+                f"📈 IV Rank: {iv.get('iv_rank', 'N/A')}%\n"
+                f"📉 IV Skew: {iv.get('skew', 'N/A')} ({iv.get('sentiment', 'N/A')})\n"
+                f"🎯 置信度: {comp.get('confidence', 'N/A')}\n\n"
+                f"📋 信号:\n{signals_text}"
+            )
+            card["elements"].append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
+            card["elements"].append({"tag": "hr"})
+        card["elements"].append({"tag": "note", "elements": [{"tag": "plain_text", "content": "⚠️ 本分析仅供参考，不构成投资建议"}]})
+        return self.send_card(card)
+
+
+# ==================== 分析引擎 ====================
+
+class FuturesOptionsAnalyzer:
+    def __init__(self, symbol: str, iv_history: list = None, put_iv: float = None, call_iv: float = None):
+        self.symbol = symbol
+        self.iv_history = iv_history or []
+        self.put_iv = put_iv
+        self.call_iv = call_iv
+    
+    def analyze(self, futures_data: dict) -> dict:
+        result = {"title": f"{self.symbol} 期货期权分析", "symbol": self.symbol, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"), "iv_signal": {}, "composite": {}, "signals": []}
+        if self.iv_history and self.put_iv and self.call_iv:
+            avg_iv = (self.put_iv + self.call_iv) / 2
+            skew_info = calculate_iv_skew(self.put_iv, self.call_iv)
+            result["iv_signal"] = {"iv_rank": calculate_iv_rank(avg_iv, self.iv_history), "iv_percentile": calculate_iv_percentile(avg_iv, self.iv_history), "skew": skew_info["skew"], "sentiment": skew_info["sentiment"], "put_iv": self.put_iv, "call_iv": self.call_iv}
+        basis = futures_data.get("basis", 0)
+        basis_signal = calculate_basis_iv_signal(basis, (self.put_iv + self.call_iv) / 2 if self.put_iv and self.call_iv else 50, self.iv_history) if self.iv_history else {"direction": "观望", "reason": "IV数据不足"}
+        df = futures_data.get("df")
+        momentum = "neutral"
+        if df is not None and not df.empty:
+            df = calculate_technical_indicators(df)
+            momentum = detect_momentum(df)
+            _, vol_ratio = calculate_volume_profile(df)
+            result["technical"] = {"momentum": momentum, "volume_ratio": round(vol_ratio, 2), "ma5": round(df['ma5'].iloc[-1], 2), "ma20": round(df['ma20'].iloc[-1], 2), "rsi": round(df['rsi'].iloc[-1], 1)}
+        if self.iv_history:
+            composite = composite_signal(result["iv_signal"].get("iv_rank", 50), result["iv_signal"].get("skew", 0), basis_signal, momentum)
+            result["composite"] = composite
+            result["signals"] = composite.get("signals", [])
+        if df is not None and not df.empty:
+            result["price"] = round(df['close'].iloc[-1], 2)
+            result["change"] = round((df['close'].iloc[-1] - df['open'].iloc[-1]) / df['open'].iloc[-1] * 100, 2)
+        return result
+    
+    def print_report(self, result: dict):
+        print("=" * 50)
+        print(f"📊 {result['title']}")
+        print("=" * 50)
+        if "price" in result:
+            print(f"价格: {result['price']} ({result['change']}%)")
+        if result.get("iv_signal"):
+            iv = result["iv_signal"]
+            print(f"\n📈 波动率信号:")
+            print(f"  IV Rank: {iv['iv_rank']}%")
+            print(f"  IV Skew: {iv['skew']}")
+            print(f"  市场情绪: {iv['sentiment']}")
+        if result.get("composite"):
+            comp = result["composite"]
+            print(f"\n🎯 综合信号:")
+            print(f"  建议: {comp['recommendation']}")
+            print(f"  评分: {comp['score']:+d}")
+            print(f"  置信度: {comp['confidence']}")
+        if result.get("signals"):
+            print(f"\n📋 信号列表:")
+            for s in result["signals"]:
+                print(f"  • {s}")
+        print("=" * 50)
+
+
+# ==================== 主程序 ====================
+
+TARGET_SYMBOLS = ["CU", "AU", "AG"]
 IV_HISTORY = {
     "CU": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],
     "AU": [12, 14, 15, 16, 18, 17, 15, 14, 13, 14, 15, 16, 18, 17, 16],
     "AG": [25, 28, 30, 32, 35, 38, 35, 32, 28, 30, 32, 35, 38, 40, 38]
 }
-
 OPTIONS_IV = {
     "CU": {"put_iv": 24.5, "call_iv": 22.3},
     "AU": {"put_iv": 16.2, "call_iv": 15.8},
@@ -64,117 +261,40 @@ OPTIONS_IV = {
 }
 
 
-def get_futures_data(symbol: str, days: int = 60) -> dict:
-    """获取期货数据"""
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-    
-    df = get_futures_daily(symbol, start_date, end_date)
-    
-    if df.empty:
-        print(f"⚠️ 无法获取 {symbol} 期货数据")
-        return {"df": None, "basis": 0}
-    
-    if len(df) > 20:
-        df = calculate_technical_indicators(df)
-    
-    return {"df": df, "basis": 0}
-
-
-def analyze_symbol(symbol: str) -> dict:
-    """分析单个品种"""
-    print(f"\n📊 正在分析 {symbol}...")
-    
-    futures_data = get_futures_data(symbol)
-    df = futures_data.get("df")
-    
-    if df is None or df.empty:
-        print(f"⚠️ {symbol} 无数据，跳过")
-        return None
-    
-    iv_history = IV_HISTORY.get(symbol, [])
-    iv_data = OPTIONS_IV.get(symbol, {})
-    
-    analyzer = FuturesOptionsAnalyzer(
-        symbol=symbol,
-        iv_history=iv_history,
-        put_iv=iv_data.get("put_iv"),
-        call_iv=iv_data.get("call_iv")
-    )
-    
-    result = analyzer.analyze(futures_data)
-    analyzer.print_report(result)
-    
-    return result
-
-
 def main():
-    """主函数"""
     print("=" * 60)
     print("🚀 期货期权综合分析")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     
-    webhook_url = os.getenv("FEISHU_WEBHOOK")
-    if webhook_url:
-        init_pusher(webhook_url)
-        print("✅ 飞书推送已初始化")
-    else:
-        print("⚠️ 未配置 FEISHU_WEBHOOK，跳过推送")
+    pusher = FeishuPusher()
+    print("✅ 飞书推送已初始化")
     
     results = []
     for symbol in TARGET_SYMBOLS:
-        result = analyze_symbol(symbol)
-        if result:
-            results.append(result)
+        print(f"\n📊 正在分析 {symbol}...")
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=60)).strftime("%Y%m%d")
+        df = get_futures_daily(symbol, start_date, end_date)
+        if df.empty:
+            print(f"⚠️ {symbol} 无数据，跳过")
+            continue
+        df = calculate_technical_indicators(df)
+        analyzer = FuturesOptionsAnalyzer(symbol=symbol, iv_history=IV_HISTORY.get(symbol, []), put_iv=OPTIONS_IV.get(symbol, {}).get("put_iv"), call_iv=OPTIONS_IV.get(symbol, {}).get("call_iv"))
+        result = analyzer.analyze({"df": df, "basis": 0})
+        analyzer.print_report(result)
+        results.append(result)
     
     if results:
-        summary = create_summary(results)
-        
-        if webhook_url:
-            print("\n📤 正在推送到飞书...")
-            if send_report(summary):
-                print("✅ 推送成功！")
-            else:
-                print("⚠️ 推送失败")
-        
-        save_results(results)
+        print("\n📤 正在推送到飞书...")
+        if pusher.send_analysis_report(results):
+            print("✅ 推送成功！")
+        else:
+            print("⚠️ 推送失败")
     else:
         print("\n⚠️ 没有可用的分析结果")
     
     print("\n✅ 分析完成!")
-
-
-def create_summary(results: list) -> dict:
-    """创建汇总报告"""
-    summary = {
-        "title": "期货期权日度分析汇总",
-        "template": "purple",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    
-    signals_text = ""
-    for r in results:
-        comp = r.get("composite", {})
-        action = comp.get("action", "watch")
-        action_emoji = {"long": "🟢", "short": "🔴", "watch": "⚪"}.get(action, "⚪")
-        signals_text += f"{action_emoji} **{r['symbol']}**: {comp.get('recommendation', 'N/A')}\n"
-    
-    summary["content"] = signals_text
-    return summary
-
-
-def save_results(results: list):
-    """保存分析结果"""
-    output_dir = os.path.join(_current_dir, "output")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    import json
-    filename = os.path.join(output_dir, f"analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump({"results": results}, f, ensure_ascii=False, indent=2)
-    
-    print(f"💾 结果已保存: {filename}")
 
 
 if __name__ == "__main__":
