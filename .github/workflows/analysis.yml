@@ -54,8 +54,7 @@ jobs:
           echo "PWD: $(pwd)"
           echo "Files: $(ls -la)"
           echo "---"
-          # Run with PYTHONPATH set to current directory
-          PYTHONPATH="$(pwd)" python main.py
+          python run_analysis.py
       
       - name: 提交结果
         run: |
