@@ -20,10 +20,10 @@ if _current_dir not in sys.path:
 load_dotenv()
 
 # 导入模块
-from futures_options import FuturesOptionsAnalyzer
-from futures_options.push.feishu import init_pusher, send_report
-from futures_options.data.futures_data import get_futures_daily
-from futures_options.utils.indicators import calculate_technical_indicators
+from . import FuturesOptionsAnalyzer
+from .push.feishu import init_pusher, send_report
+from .data.futures_data import get_futures_daily
+from .utils.indicators import calculate_technical_indicators
 
 
 # ============== 配置区 ==============
