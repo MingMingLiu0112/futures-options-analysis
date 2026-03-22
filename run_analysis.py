@@ -145,7 +145,6 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         from datetime import datetime, timedelta
         
         contract_code = symbol.upper()
-        # 保留字母，数字作为参数
         letters = ''.join([c for c in contract_code if c.isalpha()])
         numbers = ''.join([c for c in contract_code if c.isdigit()])
         
@@ -153,37 +152,26 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 方法1: AKShare期货日线 - 使用品种代码
-        try:
-            df = ak.futures_zh_daily_sina(symbol=letters)
-            print(f"✅ AKShare新浪数据: {len(df)}条, 列名={list(df.columns)}")
-        except Exception as e1:
-            print(f"AKShare新浪方法失败: {e1}")
+        # 尝试多个AKShare函数
+        ak_funcs = [
+            ("新浪日线", lambda: ak.futures_zh_daily_sina(symbol=letters)),
+            ("新浪日线2", lambda: ak.futures_zh_daily(symbol=letters, start_date=start_date, end_date=end_date)),
+            ("东财日线", lambda: ak.futures_zh_daily_em(symbol=letters)),
+            ("东财日线2", lambda: ak.futures_daily_em(symbol=letters)),
+        ]
         
-        # 方法2: 东财期货主力合约
-        if df.empty or len(df) == 0:
+        for name, func in ak_funcs:
             try:
-                main_df = ak.futures_zh_main_sina(symbol=letters)
-                print(f"✅ 东财主力数据: {len(main_df)}条")
-                if not main_df.empty:
-                    df = main_df
-            except Exception as e2:
-                print(f"东财主力方法失败: {e2}")
-        
-        # 方法3: 获取特定合约
-        if df.empty or len(df) == 0:
-            try:
-                # 尝试获取日K线
-                df = ak.futures_kline(symbol=letters, start_date="20240101", end_date="20251231")
-                print(f"✅ 期货K线数据: {len(df)}条")
-            except Exception as e3:
-                print(f"期货K线方法失败: {e3}")
+                df = func()
+                if not df.empty and len(df) > 0:
+                    print(f"✅ {name}: {len(df)}条, 列名={list(df.columns)}")
+                    break
+            except Exception as e:
+                print(f"❌ {name}失败: {e}")
         
         if df.empty or len(df) == 0:
             print(f"⚠️ {symbol} 所有AKShare方法均失败")
             return pd.DataFrame()
-        
-        print(f"   原始数据: {df.shape}")
         
         # 统一列名
         rename_map = {
@@ -210,7 +198,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         if len(df) > 60:
             df = df.tail(60)
         
-        print(f"   最终数据: {len(df)}条, 日期范围: {df['date'].min()} ~ {df['date'].max() if 'date' in df.columns and len(df) > 0 else 'N/A'}")
+        print(f"   最终数据: {len(df)}条")
         return df
         
     except Exception as e:
