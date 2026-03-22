@@ -137,58 +137,57 @@ def calculate_volume_profile(df: pd.DataFrame) -> tuple:
 def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
     使用AKShare获取期货日线数据
-    symbol格式: 如 'M2509' 表示豆粕2509, 'M' 表示豆粕主力
+    symbol格式: 如 'M2609' 表示豆粕2609
     """
     try:
         import akshare as ak
         import pandas as pd
         from datetime import datetime, timedelta
         
-        # 解析合约 - 去掉数字只保留品种代码
         contract_code = symbol.upper()
         base_symbol = ''.join([c for c in contract_code if not c.isdigit()]) or contract_code
         
         print(f"正在获取 {symbol} ({base_symbol}) 数据...")
         
-        # 获取数据
         df = pd.DataFrame()
         
-        # 方法1: 新浪期货日线
+        # 方法1: 新浪财经期货日线
         try:
+            # 使用新浪期货接口
             df = ak.futures_zh_daily_sina(symbol=base_symbol)
             print(f"✅ 新浪数据: {len(df)}条")
         except Exception as e1:
             print(f"新浪方法失败: {e1}")
         
-        # 方法2: 大商所期货
-        if df.empty:
+        # 方法2: 东财期货历史K线
+        if df.empty or len(df) == 0:
             try:
-                df = ak.futures_daily_sina(symbol=base_symbol)
-                print(f"✅ 大商所数据: {len(df)}条")
+                df = ak.futures_zh_daily(symbol=base_symbol, start_date=start_date, end_date=end_date)
+                print(f"✅ 东财日线数据: {len(df)}条")
             except Exception as e2:
-                print(f"大商所方法失败: {e2}")
+                print(f"东财方法失败: {e2}")
         
-        # 方法3: 东财期货历史
-        if df.empty:
+        # 方法3: 获取期货历史持仓
+        if df.empty or len(df) == 0:
             try:
-                df = ak.futures_zh_history(symbol="dalian")
-                if not df.empty and 'symbol' in df.columns:
-                    df = df[df['symbol'].str.contains(base_symbol, na=False)]
-                print(f"✅ 东财历史数据: {len(df)}条")
+                df = ak.futures_hold_pos_sina(symbol=base_symbol)
+                print(f"✅ 持仓数据: {len(df)}条")
             except Exception as e3:
-                print(f"东财历史方法失败: {e3}")
+                print(f"持仓方法失败: {e3}")
         
-        if df.empty:
+        if df.empty or len(df) == 0:
             print(f"⚠️ {symbol} 所有数据源均失败")
             return pd.DataFrame()
+        
+        print(f"   原始列名: {list(df.columns)[:10]}")
         
         # 统一列名
         rename_map = {
             '日期': 'date', 'date': 'date', 'trade_date': 'date',
-            '开盘': 'open', 'open': 'open',
-            '最高': 'high', 'high': 'high',
-            '最低': 'low', 'low': 'low',
-            '收盘': 'close', 'close': 'close',
+            '开盘': 'open', 'open': 'open', '开盘价': 'open',
+            '最高': 'high', 'high': 'high', '最高价': 'high',
+            '最低': 'low', 'low': 'low', '最低价': 'low',
+            '收盘': 'close', 'close': 'close', '收盘价': 'close',
             '成交量': 'volume', 'volume': 'volume',
             '持仓量': 'position', 'position': 'position'
         }
@@ -208,7 +207,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         if len(df) > 60:
             df = df.tail(60)
         
-        print(f"   最终数据: {len(df)}条")
+        print(f"   最终数据: {len(df)}条, 日期: {df['date'].min() if 'date' in df.columns else 'N/A'}")
         return df
         
     except Exception as e:
@@ -345,11 +344,11 @@ class FuturesOptionsAnalyzer:
 
 # 期货品种配置 - 支持多种合约
 # 格式: "M2509" = 豆粕2509, "CU2509" = 铜2509, "AU2509" = 黄金2509
-TARGET_SYMBOLS = ["M2509", "CU2509", "AU2509", "AG2509"]
+TARGET_SYMBOLS = ["M2609"]  # 豆粕2609
 
 # IV历史数据（需要从数据源获取或存储）
 IV_HISTORY = {
-    "M2509": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],  # 豆粕
+    "M2609": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],  # 豆粕
     "CU2509": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],  # 铜
     "AU2509": [12, 14, 15, 16, 18, 17, 15, 14, 13, 14, 15, 16, 18, 17, 16],  # 黄金
     "AG2509": [25, 28, 30, 32, 35, 38, 35, 32, 28, 30, 32, 35, 38, 40, 38]   # 白银
@@ -357,10 +356,7 @@ IV_HISTORY = {
 
 # 期权IV数据（需要从数据源获取）
 OPTIONS_IV = {
-    "M2509": {"put_iv": 22.5, "call_iv": 20.3},   # 豆粕
-    "CU2509": {"put_iv": 24.5, "call_iv": 22.3}, # 铜
-    "AU2509": {"put_iv": 16.2, "call_iv": 15.8}, # 黄金
-    "AG2509": {"put_iv": 35.0, "call_iv": 32.5}  # 白银
+    "M2609": {"put_iv": 22.5, "call_iv": 20.3},   # 豆粕
 }
 
 
