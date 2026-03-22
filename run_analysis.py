@@ -137,7 +137,7 @@ def calculate_volume_profile(df: pd.DataFrame) -> tuple:
 def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
     """
     使用AKShare获取期货日线数据
-    symbol格式: 如 'M2609' 表示豆粕2609
+    symbol格式: 'M' = 豆粕主力, 'M2609' = 豆粕2609
     """
     try:
         import akshare as ak
@@ -151,44 +151,61 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 方法1: 新浪财经期货日线
+        # 方法1: 新浪财经期货日线 - 使用品种代码
         try:
-            # 使用新浪期货接口
             df = ak.futures_zh_daily_sina(symbol=base_symbol)
-            print(f"✅ 新浪数据: {len(df)}条")
+            if not df.empty:
+                print(f"✅ 新浪数据: {len(df)}条")
         except Exception as e1:
             print(f"新浪方法失败: {e1}")
         
-        # 方法2: 东财期货历史K线
+        # 方法2: 东财期货行情列表
         if df.empty or len(df) == 0:
             try:
-                df = ak.futures_zh_daily(symbol=base_symbol, start_date=start_date, end_date=end_date)
-                print(f"✅ 东财日线数据: {len(df)}条")
+                spot_df = ak.futures_zh_spot()
+                # 筛选豆粕
+                if 'symbol' in spot_df.columns:
+                    m_df = spot_df[spot_df['symbol'].str.contains(base_symbol, case=False, na=False)]
+                    if not m_df.empty:
+                        print(f"✅ 东财行情数据: {len(m_df)}条")
+                        print(f"   可用合约: {list(m_df['symbol'].head(5))}")
             except Exception as e2:
-                print(f"东财方法失败: {e2}")
+                print(f"东财行情方法失败: {e2}")
         
-        # 方法3: 获取期货历史持仓
+        # 方法3: 期货主力合约历史
         if df.empty or len(df) == 0:
             try:
-                df = ak.futures_hold_pos_sina(symbol=base_symbol)
-                print(f"✅ 持仓数据: {len(df)}条")
+                # 获取主力合约
+                main_df = ak.futures_zh_main_sina(symbol=base_symbol)
+                if not main_df.empty and len(main_df) > 0:
+                    df = main_df
+                    print(f"✅ 主力合约数据: {len(df)}条")
             except Exception as e3:
-                print(f"持仓方法失败: {e3}")
+                print(f"主力合约方法失败: {e3}")
+        
+        # 方法4: 尝试获取日K线
+        if df.empty or len(df) == 0:
+            try:
+                # 使用新浪的另一个接口
+                df = ak.futures_realtime(symbol=base_symbol)
+                print(f"✅ 实时数据: {len(df)}条")
+            except Exception as e4:
+                print(f"实时方法失败: {e4}")
         
         if df.empty or len(df) == 0:
             print(f"⚠️ {symbol} 所有数据源均失败")
             return pd.DataFrame()
         
-        print(f"   原始列名: {list(df.columns)[:10]}")
+        print(f"   原始列名: {list(df.columns)[:8]}")
         
         # 统一列名
         rename_map = {
-            '日期': 'date', 'date': 'date', 'trade_date': 'date',
+            '日期': 'date', 'date': 'date', 'trade_date': 'date', 'datetime': 'date',
             '开盘': 'open', 'open': 'open', '开盘价': 'open',
             '最高': 'high', 'high': 'high', '最高价': 'high',
             '最低': 'low', 'low': 'low', '最低价': 'low',
             '收盘': 'close', 'close': 'close', '收盘价': 'close',
-            '成交量': 'volume', 'volume': 'volume',
+            '成交量': 'volume', 'volume': 'volume', 'vol': 'volume',
             '持仓量': 'position', 'position': 'position'
         }
         df = df.rename(columns=rename_map)
@@ -207,7 +224,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         if len(df) > 60:
             df = df.tail(60)
         
-        print(f"   最终数据: {len(df)}条, 日期: {df['date'].min() if 'date' in df.columns else 'N/A'}")
+        print(f"   最终数据: {len(df)}条")
         return df
         
     except Exception as e:
