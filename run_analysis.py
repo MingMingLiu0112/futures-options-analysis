@@ -145,36 +145,44 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         from datetime import datetime, timedelta
         
         contract_code = symbol.upper()
-        # 去掉数字，保留品种代码
         base_symbol = ''.join([c for c in contract_code if not c.isdigit()]) or contract_code
         
         print(f"正在获取 {symbol} ({base_symbol}) 数据...")
         
         df = pd.DataFrame()
         
-        # 方法1: AKShare新浪期货日线 - 使用品种代码
+        # 方法1: AKShare新浪期货日线
         try:
             df = ak.futures_zh_daily_sina(symbol=base_symbol)
-            print(f"✅ AKShare新浪数据: {len(df)}条")
+            print(f"✅ AKShare新浪数据: shape={df.shape}, columns={list(df.columns)}")
         except Exception as e1:
             print(f"AKShare新浪方法失败: {e1}")
+            # 打印原始返回
+            try:
+                import requests
+                url = f"https://hq.sinajs.cn/list=nf_{base_symbol}"
+                resp = requests.get(url, headers={'Referer': 'https://finance.sina.com.cn/', 'User-Agent': 'Mozilla/5.0'}, timeout=10)
+                print(f"   原始响应: {resp.text[:200]}")
+            except:
+                pass
         
         # 方法2: 东财期货行情
         if df.empty or len(df) == 0:
             try:
                 spot_df = ak.futures_zh_spot()
+                print(f"✅ 东财行情: shape={spot_df.shape}, columns={list(spot_df.columns)[:5]}")
                 # 筛选品种
                 if 'symbol' in spot_df.columns:
                     m_df = spot_df[spot_df['symbol'].str.contains(base_symbol, case=False, na=False)]
-                    print(f"✅ 东财行情数据: {len(m_df)}条")
+                    print(f"   筛选后: {len(m_df)}条")
+                    if not m_df.empty:
+                        print(f"   示例数据: {m_df.iloc[0].to_dict()}")
             except Exception as e2:
                 print(f"东财行情方法失败: {e2}")
         
         if df.empty or len(df) == 0:
             print(f"⚠️ {symbol} AKShare数据获取失败")
             return pd.DataFrame()
-        
-        print(f"   原始列名: {list(df.columns)}")
         
         # 统一列名
         rename_map = {
