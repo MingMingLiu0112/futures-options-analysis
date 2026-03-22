@@ -152,17 +152,34 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         # 获取AKShare中所有包含futures的函数
         futures_funcs = [f for f in dir(ak) if 'future' in f.lower()]
-        print(f"AKShare期货函数: {futures_funcs[:10]}")
+        print(f"AKShare期货函数: {futures_funcs}")
         
-        # 方法1: 尝试futures_zh_daily_sina
-        try:
-            result = ak.futures_zh_daily_sina(symbol=letters)
-            print(f"futures_zh_daily_sina返回: {type(result)}, shape={getattr(result, 'shape', 'N/A')}")
-            if hasattr(result, 'shape') and len(result.shape) > 1:
-                df = result
-                print(f"✅ 新浪日线: {len(df)}条")
-        except Exception as e:
-            print(f"新浪日线失败: {e}")
+        # 获取所有包含daily的函数
+        daily_funcs = [f for f in dir(ak) if 'daily' in f.lower() or 'hist' in f.lower()]
+        print(f"日线函数: {daily_funcs}")
+        
+        # 获取所有包含zh的函数
+        zh_funcs = [f for f in dir(ak) if 'zh' in f.lower() and 'future' in f.lower()]
+        print(f"中文期货函数: {zh_funcs}")
+        
+        # 方法1: 尝试所有可能的函数
+        all_funcs_to_try = [
+            ("新浪日线", lambda: ak.futures_zh_daily_sina(symbol=letters)),
+            ("新浪日线2", lambda: ak.futures_daily_sina(symbol=letters)),
+            ("日K线", lambda: ak.futures_daily(symbol=letters)),
+            ("历史K线", lambda: ak.futures_hist(symbol=letters)),
+        ]
+        
+        for name, func in all_funcs_to_try:
+            try:
+                result = func()
+                if result is not None and not result.empty and len(result) > 0:
+                    if hasattr(result, 'shape') and len(result.shape) > 1:
+                        df = result
+                        print(f"✅ {name}: {len(df)}条")
+                        break
+            except Exception as e:
+                print(f"❌ {name}失败: {e}")
         
         if df.empty:
             print(f"⚠️ {symbol} 获取失败")
