@@ -135,43 +135,117 @@ def calculate_volume_profile(df: pd.DataFrame) -> tuple:
 # ==================== 数据获取模块 ====================
 
 def get_futures_daily(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    使用AKShare获取期货日线数据
+    symbol格式: 如 'M2509' 表示豆粕2509
+    """
     try:
         import akshare as ak
-        # 尝试获取期货数据
+        
+        # 期货合约代码映射
+        futures_map = {
+            'M2509': ('M', '2509'),   # 豆粕
+            'CU2509': ('CU', '2509'), # 铜
+            'AU2509': ('AU', '2509'), # 黄金
+            'AG2509': ('AG', '2509'), # 白银
+            'RU2509': ('RU', '2509'), # 橡胶
+            'SC2509': ('SC', '2509'), # 原油
+        }
+        
+        # 解析合约
+        contract_code = symbol.upper()
+        
+        # 获取主力合约历史K线
         try:
-            df = ak.futures_zh_daily_sina(symbol=symbol)
-            if 'date' in df.columns:
-                df['date'] = pd.to_datetime(df['date'])
-            elif '日期' in df.columns:
-                df = df.rename(columns={'日期': 'date'})
-                df['date'] = pd.to_datetime(df['date'])
-            # 筛选日期范围
-            start_dt = datetime.strptime(start_date, "%Y%m%d")
-            end_dt = datetime.strptime(end_date, "%Y%m%d")
-            df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
-            if not df.empty:
-                return df
-        except:
-            pass
-        # 如果真实数据获取失败，生成模拟数据用于演示
-        print(f"⚠️ {symbol} 真实数据获取失败，使用模拟数据")
-        dates = pd.date_range(end=datetime.now(), periods=60, freq='D')
-        base_prices = {"CU": 70000, "AU": 2000, "AG": 6000, "RU": 15000, "SC": 600}
-        base = base_prices.get(symbol, 10000)
-        np.random.seed(hash(symbol) % 2**32)
-        prices = base + np.cumsum(np.random.randn(60) * base * 0.01)
-        df = pd.DataFrame({
-            'date': dates,
-            'open': prices + np.random.randn(60) * base * 0.005,
-            'high': prices + abs(np.random.randn(60)) * base * 0.01,
-            'low': prices - abs(np.random.randn(60)) * base * 0.01,
-            'close': prices,
-            'volume': np.random.randint(10000, 50000, 60)
-        })
+            # 方法1: 期货主力连续合约
+            df = ak.futures_zh_daily_sina(symbol=contract_code)
+            print(f"✅ {symbol} 数据获取成功 ({len(df)}条)")
+        except Exception as e1:
+            print(f"方法1失败: {e1}")
+            df = pd.DataFrame()
+        
+        # 方法2: 如果方法1失败，尝试获取特定合约
+        if df.empty:
+            try:
+                # 获取大商所期货数据
+                df = ak.futures_daily_sina(symbol=contract_code)
+                print(f"✅ {symbol} 方法2获取成功 ({len(df)}条)")
+            except Exception as e2:
+                print(f"方法2失败: {e2}")
+        
+        # 方法3: 尝试东方财富期货数据
+        if df.empty:
+            try:
+                df = ak.stock_zh_a_hist(symbol='M2509', period='daily', start_date=start_date, end_date=end_date.replace('',''))
+                print(f"✅ {symbol} 方法3获取成功 ({len(df)}条)")
+            except Exception as e3:
+                print(f"方法3失败: {e3}")
+        
+        if df.empty:
+            print(f"⚠️ {symbol} 所有方法均失败")
+            return pd.DataFrame()
+        
+        # 统一列名
+        if '日期' in df.columns:
+            df = df.rename(columns={'日期': 'date'})
+        if 'date' not in df.columns and '日期' not in df.columns:
+            if 'trade_date' in df.columns:
+                df = df.rename(columns={'trade_date': 'date'})
+        
+        # 转换日期格式
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+        
+        # 筛选日期范围
+        start_dt = datetime.strptime(start_date, "%Y%m%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d")
+        df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+        
+        # 确保必要的列存在
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        for col in required_cols:
+            if col not in df.columns:
+                # 尝试中文列名
+                if col == 'open' and '开盘' in df.columns:
+                    df = df.rename(columns={'开盘': 'open'})
+                elif col == 'high' and '最高' in df.columns:
+                    df = df.rename(columns={'最高': 'high'})
+                elif col == 'low' and '最低' in df.columns:
+                    df = df.rename(columns={'最低': 'low'})
+                elif col == 'close' and '收盘' in df.columns:
+                    df = df.rename(columns={'收盘': 'close'})
+                elif col == 'volume' and '成交量' in df.columns:
+                    df = df.rename(columns={'成交量': 'volume'})
+        
         return df
+        
     except Exception as e:
         print(f"获取期货数据失败: {e}")
         return pd.DataFrame()
+
+
+def get_realtime_quote(symbol: str) -> dict:
+    """获取期货实时行情"""
+    try:
+        import akshare as ak
+        # 尝试获取实时行情
+        df = ak.futures_zh_spot()
+        # 筛选对应合约
+        contract = symbol.upper()
+        if contract in df['symbol'].values:
+            row = df[df['symbol'] == contract].iloc[0]
+            return {
+                'symbol': contract,
+                'open': float(row.get('open', 0)),
+                'high': float(row.get('high', 0)),
+                'low': float(row.get('low', 0)),
+                'close': float(row.get('close', row.get('current', 0))),
+                'volume': int(row.get('volume', 0)),
+                'change': float(row.get('change', 0)),
+            }
+    except Exception as e:
+        print(f"获取实时行情失败: {e}")
+    return {}
 
 
 # ==================== 飞书推送模块 ====================
@@ -275,14 +349,25 @@ class FuturesOptionsAnalyzer:
 
 # ==================== 主程序 ====================
 
-TARGET_SYMBOLS = ["CU", "AU", "AG"]
+# 期货品种配置 - 支持多种合约
+# 格式: "M2509" = 豆粕2509, "CU2509" = 铜2509, "AU2509" = 黄金2509
+TARGET_SYMBOLS = ["M2509", "CU2509", "AU2509", "AG2509"]
+
+# IV历史数据（需要从数据源获取或存储）
 IV_HISTORY = {
-    "CU": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],
-    "AU": [12, 14, 15, 16, 18, 17, 15, 14, 13, 14, 15, 16, 18, 17, 16],
-    "AG": [25, 28, 30, 32, 35, 38, 35, 32, 28, 30, 32, 35, 38, 40, 38]
+    "M2509": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],  # 豆粕
+    "CU2509": [20, 22, 25, 28, 30, 32, 28, 25, 22, 24, 26, 28, 30, 32, 35],  # 铜
+    "AU2509": [12, 14, 15, 16, 18, 17, 15, 14, 13, 14, 15, 16, 18, 17, 16],  # 黄金
+    "AG2509": [25, 28, 30, 32, 35, 38, 35, 32, 28, 30, 32, 35, 38, 40, 38]   # 白银
 }
+
+# 期权IV数据（需要从数据源获取）
 OPTIONS_IV = {
-    "CU": {"put_iv": 24.5, "call_iv": 22.3},
+    "M2509": {"put_iv": 22.5, "call_iv": 20.3},   # 豆粕
+    "CU2509": {"put_iv": 24.5, "call_iv": 22.3}, # 铜
+    "AU2509": {"put_iv": 16.2, "call_iv": 15.8}, # 黄金
+    "AG2509": {"put_iv": 35.0, "call_iv": 32.5}  # 白银
+}
     "AU": {"put_iv": 16.2, "call_iv": 15.8},
     "AG": {"put_iv": 35.0, "call_iv": 32.5}
 }
