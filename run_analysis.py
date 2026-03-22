@@ -141,8 +141,6 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
     try:
         import akshare as ak
         import pandas as pd
-        import numpy as np
-        import traceback
         from datetime import datetime, timedelta
         
         contract_code = symbol.upper()
@@ -152,27 +150,59 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 方法1: 新浪期货日线 - 添加详细调试
+        # 方法1: 期货基本信息
         try:
-            print("调用akshare...")
-            result = ak.futures_zh_daily_sina(symbol=letters)
-            print(f"返回类型: {type(result)}")
-            print(f"返回内容: {str(result)[:500]}")
-            
-            # 检查是否是空数据
-            if result is None or (hasattr(result, 'empty') and result.empty):
-                print("返回数据为空")
-            elif isinstance(result, dict):
-                print(f"字典keys: {list(result.keys())}")
-            elif isinstance(result, (list, tuple)):
-                print(f"列表长度: {len(result)}")
-            
-        except Exception as e:
-            print(f"异常: {e}")
-            traceback.print_exc()
+            info = ak.futures_comm_info(symbol=letters)
+            print(f"✅ 期货信息: {info.shape if hasattr(info, 'shape') else type(info)}")
+            if hasattr(info, 'head'):
+                print(f"信息预览: {info.head()}")
+        except Exception as e1:
+            print(f"期货信息失败: {e1}")
         
-        print(f"⚠️ {symbol} 获取失败")
-        return pd.DataFrame()
+        # 方法2: 合约详情
+        try:
+            contracts = ak.futures_contract_detail(symbol=letters)
+            print(f"✅ 合约详情: {contracts.shape if hasattr(contracts, 'shape') else type(contracts)}")
+        except Exception as e2:
+            print(f"合约详情失败: {e2}")
+        
+        # 方法3: 期货函数
+        try:
+            futures_data = ak.futures(symbol=letters)
+            print(f"✅ 期货数据: {futures_data.shape if hasattr(futures_data, 'shape') else type(futures_data)}")
+            if hasattr(futures_data, 'shape') and len(futures_data.shape) > 1:
+                df = futures_data
+        except Exception as e3:
+            print(f"期货函数失败: {e3}")
+        
+        if df.empty or len(df.columns) == 0:
+            print(f"⚠️ {symbol} 获取失败")
+            return pd.DataFrame()
+        
+        # 统一列名
+        rename_map = {
+            '日期': 'date', 'date': 'date', 'trade_date': 'date', 'datetime': 'date',
+            '开盘': 'open', 'open': 'open',
+            '最高': 'high', 'high': 'high',
+            '最低': 'low', 'low': 'low',
+            '收盘': 'close', 'close': 'close',
+            '成交量': 'volume', 'volume': 'volume'
+        }
+        df = df.rename(columns=rename_map)
+        
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df.sort_values('date')
+        
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        if len(df) > 60:
+            df = df.tail(60)
+        
+        print(f"   最终数据: {len(df)}条")
+        return df
         
     except Exception as e:
         print(f"获取期货数据失败: {e}")
