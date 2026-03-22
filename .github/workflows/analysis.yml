@@ -51,7 +51,10 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
           echo "📊 期货品种: ${{ github.event.inputs.symbols || 'CU,AU,AG' }}"
-          python main.py
+          echo "PWD: $(pwd)"
+          echo "Files: $(ls -la)"
+          echo "---"
+          python run_analysis.py
       
       - name: 提交结果
         run: |

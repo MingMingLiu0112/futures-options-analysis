@@ -2,6 +2,8 @@
 """
 期货期权分析 - 主入口
 支持多品种分析，输出到飞书
+
+注意: 需要设置 PYTHONPATH 或从项目根目录运行
 """
 
 import os
@@ -9,8 +11,10 @@ import sys
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# 添加项目路径到 sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 确保当前目录在 sys.path 中
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
 
 # 加载环境变量
 load_dotenv()
