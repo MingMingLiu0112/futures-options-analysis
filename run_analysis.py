@@ -142,6 +142,7 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         import akshare as ak
         import pandas as pd
         import numpy as np
+        import traceback
         from datetime import datetime, timedelta
         
         contract_code = symbol.upper()
@@ -151,63 +152,27 @@ def get_futures_daily(symbol: str, start_date: str = None, end_date: str = None)
         
         df = pd.DataFrame()
         
-        # 方法1: 新浪期货日线
+        # 方法1: 新浪期货日线 - 添加详细调试
         try:
+            print("调用akshare...")
             result = ak.futures_zh_daily_sina(symbol=letters)
-            print(f"返回类型: {type(result)}, shape: {getattr(result, 'shape', 'N/A')}")
+            print(f"返回类型: {type(result)}")
+            print(f"返回内容: {str(result)[:500]}")
             
-            # 如果返回Series，转换为DataFrame
-            if isinstance(result, pd.Series):
-                print("转换为DataFrame...")
-                df = result.to_frame().T
-                print(f"转换后: {df.shape}")
-            elif isinstance(result, pd.DataFrame):
-                df = result
-                print(f"DataFrame: {df.shape}")
-            elif hasattr(result, '__iter__') and not isinstance(result, str):
-                # 如果是列表或字典
-                if isinstance(result, (list, tuple)):
-                    df = pd.DataFrame(result)
-                elif isinstance(result, dict):
-                    if len(result) > 0:
-                        first_val = list(result.values())[0]
-                        if isinstance(first_val, (list, tuple)):
-                            df = pd.DataFrame(result)
-                        else:
-                            df = pd.DataFrame([result])
+            # 检查是否是空数据
+            if result is None or (hasattr(result, 'empty') and result.empty):
+                print("返回数据为空")
+            elif isinstance(result, dict):
+                print(f"字典keys: {list(result.keys())}")
+            elif isinstance(result, (list, tuple)):
+                print(f"列表长度: {len(result)}")
             
-            print(f"处理后数据: {df.shape if not df.empty else 'empty'}")
         except Exception as e:
-            print(f"新浪日线失败: {e}")
+            print(f"异常: {e}")
+            traceback.print_exc()
         
-        if df.empty or len(df.columns) == 0:
-            print(f"⚠️ {symbol} 获取失败")
-            return pd.DataFrame()
-        
-        # 统一列名
-        rename_map = {
-            '日期': 'date', 'date': 'date', 'trade_date': 'date', 'datetime': 'date',
-            '开盘': 'open', 'open': 'open',
-            '最高': 'high', 'high': 'high',
-            '最低': 'low', 'low': 'low',
-            '收盘': 'close', 'close': 'close',
-            '成交量': 'volume', 'volume': 'volume'
-        }
-        df = df.rename(columns=rename_map)
-        
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-            df = df.sort_values('date')
-        
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        if len(df) > 60:
-            df = df.tail(60)
-        
-        print(f"   最终数据: {len(df)}条")
-        return df
+        print(f"⚠️ {symbol} 获取失败")
+        return pd.DataFrame()
         
     except Exception as e:
         print(f"获取期货数据失败: {e}")
