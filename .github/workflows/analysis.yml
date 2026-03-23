@@ -12,7 +12,7 @@ on:
       symbols:
         description: '期货品种 (逗号分隔)'
         required: false
-        default: 'CU,AU,AG'
+        default: 'M2609,CU2606,AU2606,AG2606'
         type: string
 
 # 并发控制
@@ -50,7 +50,7 @@ jobs:
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          echo "📊 期货品种: ${{ github.event.inputs.symbols || 'CU,AU,AG' }}"
+          echo "📊 期货品种: ${{ github.event.inputs.symbols || 'M2609,CU2606,AU2606,AG2606' }}"
           echo "---"
           python run_analysis.py
       
