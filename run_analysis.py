@@ -475,12 +475,30 @@ def build_feishu_card(results: List[Dict]) -> Dict:
 
     now_str = now_beijing().strftime("%Y-%m-%d %H:%M")
 
+    # 构建简洁表格
+    table_lines = ["品种|信号|价格|涨跌|RSI", "---|---|---|---|---"]
+    for r in results:
+        tech = r.get("tech", {})
+        sig = r.get("signal", {})
+        if not tech:
+            continue
+        emoji = sig.get("action_emoji", "⚪")
+        name = r.get("display_name", r.get("name", ""))
+        action = sig.get("action", "观望")
+        price = tech.get("price", 0)
+        change = tech.get("change", 0)
+        rsi = tech.get("rsi", 0)
+        arrow = "📈" if change >= 0 else "📉"
+        table_lines.append(f"{emoji}{name}|{action}|{price}|{arrow}{change:+.2f}%|{rsi:.1f}")
+
+    table_md = "\n".join(table_lines)
+
     elements = [
         {
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": f"⏰ **{now_str}** · {summary}"
+                "content": f"⏰ **{now_str}** · {summary}\n\n{table_md}"
             }
         }
     ]
