@@ -37,7 +37,9 @@ jobs:
       - name: 执行分析
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        run: python run_analysis.py
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
+          python run_analysis.py
 
       - name: 提交结果
         run: |
